@@ -70,6 +70,23 @@ ANIMATION RULES (R6 ONLY):
 let lastCall = 0;
 let memory = [];
 
+let lastRequestTime = Date.now();
+
+app.use((req, res, next) => {
+	lastRequestTime = Date.now();
+	next();
+});
+
+app.get("/status", (req, res) => {
+	const now = Date.now();
+	const inactiveMs = now - lastRequestTime;
+
+	res.json({
+		status: "online",
+		inactiveSeconds: Math.floor(inactiveMs / 1000)
+	});
+});
+
 app.get("/", (req, res) => {
     res.send("OK");
 });
