@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 app.use(cors());
@@ -15,6 +14,7 @@ let memory = [];
 let lastCall = 0;
 
 function extractJSON(text) {
+	if (!text) return null;
 	text = text.replace(/```json/g, "").replace(/```/g, "").trim();
 	const start = text.indexOf("{");
 	const end = text.lastIndexOf("}");
@@ -41,13 +41,19 @@ async function callGemini(prompt) {
 		);
 
 		const data = await res.json();
-		let text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+		if (!res.ok) {
+			console.log("Gemini error:", data);
+			return null;
+		}
+
+		const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
 		console.log("Gemini:", text);
 
 		return text;
 	} catch (err) {
-		console.log("Gemini error:", err);
+		console.log("Gemini crash:", err);
 		return null;
 	}
 }
@@ -58,7 +64,9 @@ async function callOpenRouter(prompt) {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${OPENROUTER_KEY}`,
-				"Content-Type": "application/json"
+				"Content-Type": "application/json",
+				"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
+				"X-Title": "Roblox AI Builder"
 			},
 			body: JSON.stringify({
 				model: "deepseek/deepseek-chat",
@@ -76,7 +84,7 @@ async function callOpenRouter(prompt) {
 			return null;
 		}
 
-		let text = data?.choices?.[0]?.message?.content;
+		const text = data?.choices?.[0]?.message?.content;
 
 		console.log("OpenRouter:", text);
 
