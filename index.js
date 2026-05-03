@@ -10,6 +10,205 @@ const PORT = process.env.PORT || 10000;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 
+function buildPrompt(userPrompt, selected) {
+	return `
+You are a Roblox Studio AI builder.
+
+STRICT RULES:
+- RETURN ONLY VALID JSON
+- NO MARKDOWN
+- NO EXPLANATIONS
+- NO TEXT OUTSIDE JSON
+- MUST BE JSON.parse SAFE
+
+========================
+FORMAT:
+
+{
+  "actions": [
+    {
+      "type": "create | set | delete",
+      "class": "Instance class name",
+      "name": "object name",
+      "parent": "Workspace | StarterGui | StarterPack | ReplicatedStorage",
+      "target": "optional path",
+      "properties": {},
+      "children": []
+    }
+  ]
+}
+
+========================
+CRITICAL GLOBAL RULES:
+
+- "actions" MUST ALWAYS EXIST
+- NEVER return empty actions
+- If unsure → create a simple Part in Workspace
+- ALWAYS use valid Roblox class names
+- ALWAYS use correct hierarchy
+- ALWAYS use "children" for nesting
+- NEVER place children outside of "children" array
+
+========================
+SCRIPT RULES:
+
+- Scripts MUST use:
+  - Script
+  - LocalScript
+- Code goes inside:
+  properties.Source
+
+Example:
+
+{
+  "type": "create",
+  "class": "Script",
+  "name": "MyScript",
+  "parent": "Workspace",
+  "properties": {
+    "Source": "print(\\"Hello world\\")"
+  }
+}
+
+========================
+UI RULES:
+
+- UI must be inside StarterGui
+- Use:
+  ScreenGui → Frame → TextLabel / TextButton
+
+========================
+TOOL RULES:
+
+- Tools go in StarterPack
+- Tool must contain:
+  - Handle (Part)
+
+========================
+PARTICLE RULES:
+
+- Use ParticleEmitter inside a Part
+
+========================
+ANIMATION RULES (R6 ONLY):
+
+If user asks for R15:
+RETURN:
+{ "error": "Only R6 animations are supported" }
+
+STRUCTURE MUST BE EXACT:
+
+KeyframeSequence
+ └ Keyframe (Time REQUIRED)
+    └ Pose "HumanoidRootPart"
+       └ Pose "Torso" (MANDATORY)
+          ├ Pose "Left Arm"
+          ├ Pose "Right Arm"
+          ├ Pose "Left Leg"
+          └ Pose "Right Leg"
+
+CRITICAL:
+
+- Torso MUST ALWAYS exist
+- Limbs MUST be inside Torso
+- Minimum 2 Keyframes REQUIRED
+- Every Keyframe MUST have "Time"
+
+========================
+EASING RULES:
+
+- ONLY apply to Pose
+- NEVER apply to Keyframe
+
+EasingDirection:
+"In", "Out", "InOut", "OutIn"
+
+EasingStyle:
+"Linear", "Bounce", "Elastic", "Cubic"
+
+========================
+TRANSFORMS:
+
+- Position: [x, y, z]
+- Orientation: [x, y, z]
+
+========================
+VALID ANIMATION EXAMPLE:
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "KeyframeSequence",
+      "name": "ExampleAnim",
+      "parent": "Workspace",
+      "children": [
+        {
+          "class": "Keyframe",
+          "name": "Start",
+          "properties": { "Time": 0 },
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "children": [
+                    { "class": "Pose", "name": "Left Arm" },
+                    { "class": "Pose", "name": "Right Arm" },
+                    { "class": "Pose", "name": "Left Leg" },
+                    { "class": "Pose", "name": "Right Leg" }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "Keyframe",
+          "name": "End",
+          "properties": { "Time": 1 },
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "children": [
+                    { "class": "Pose", "name": "Left Arm" },
+                    { "class": "Pose", "name": "Right Arm" },
+                    { "class": "Pose", "name": "Left Leg" },
+                    { "class": "Pose", "name": "Right Leg" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+========================
+FAILSAFE:
+
+- If request is unclear → create a Part named "GeneratedPart"
+- NEVER return empty or invalid JSON
+
+========================
+
+Selected: ${selected || "none"}
+
+User request:
+${userPrompt}
+`;
+}
+
 let memory = [];
 let lastCall = 0;
 
@@ -24,9 +223,18 @@ function extractJSON(text) {
 	return text;
 }
 
+function fetchWithTimeout(url, options, timeout = 15000) {
+	return Promise.race([
+		fetch(url, options),
+		new Promise((_, reject) =>
+			setTimeout(() => reject(new Error("Timeout")), timeout)
+		)
+	]);
+}
+
 async function callGemini(prompt) {
 	try {
-		const res = await fetch(
+		const res = await fetchWithTimeout(
 			"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
 			{
 				method: "POST",
@@ -53,29 +261,32 @@ async function callGemini(prompt) {
 
 		return text;
 	} catch (err) {
-		console.log("Gemini crash:", err);
+		console.log("Gemini crash:", err.message);
 		return null;
 	}
 }
 
 async function callOpenRouter(prompt) {
 	try {
-		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${OPENROUTER_KEY}`,
-				"Content-Type": "application/json",
-				"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
-				"X-Title": "Roblox AI Builder"
-			},
-			body: JSON.stringify({
-				model: "deepseek/deepseek-chat",
-				messages: [
-					{ role: "system", content: "Return ONLY valid JSON." },
-					{ role: "user", content: prompt }
-				]
-			})
-		});
+		const res = await fetchWithTimeout(
+			"https://openrouter.ai/api/v1/chat/completions",
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${OPENROUTER_KEY}`,
+					"Content-Type": "application/json",
+					"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
+					"X-Title": "Roblox AI Builder"
+				},
+				body: JSON.stringify({
+					model: "mistralai/mistral-7b-instruct",
+					messages: [
+						{ role: "system", content: "Return ONLY valid JSON." },
+						{ role: "user", content: prompt }
+					]
+				})
+			}
+		);
 
 		const data = await res.json();
 
@@ -90,29 +301,9 @@ async function callOpenRouter(prompt) {
 
 		return text;
 	} catch (err) {
-		console.log("OpenRouter crash:", err);
+		console.log("OpenRouter crash:", err.message);
 		return null;
 	}
-}
-
-function buildPrompt(userPrompt, selected) {
-	const examples = memory.slice(-5).map(e => `
-User: ${e.prompt}
-Output:
-${JSON.stringify(e.result)}
-`).join("\n");
-
-	return `
-You are a Roblox Studio AI builder.
-
-Return ONLY valid JSON.
-
-${examples}
-
-Selected: ${selected || "none"}
-
-User: ${userPrompt}
-`;
 }
 
 app.get("/", (req, res) => {
@@ -128,12 +319,13 @@ app.post("/generate", async (req, res) => {
 		lastCall = now;
 
 		const { prompt, selected } = req.body;
+
 		const fullPrompt = buildPrompt(prompt, selected);
 
 		let text = await callGemini(fullPrompt);
 
 		if (!text || text.length < 10) {
-			console.log("Falling back to OpenRouter");
+			console.log("Fallback to OpenRouter");
 			text = await callOpenRouter(fullPrompt);
 		}
 
@@ -147,15 +339,32 @@ app.post("/generate", async (req, res) => {
 
 		try {
 			parsed = JSON.parse(text);
-		} catch (e) {
+		} catch {
 			console.log("INVALID JSON:", text);
 			return res.json({ error: "Invalid JSON", raw: text });
+		}
+
+		if (!parsed.actions) {
+			console.log("Retrying with OpenRouter (no actions)");
+
+			let retry = await callOpenRouter(fullPrompt);
+
+			if (retry) {
+				retry = extractJSON(retry);
+				try {
+					parsed = JSON.parse(retry);
+				} catch {}
+			}
+		}
+
+		if (!parsed.actions) {
+			return res.json({ error: "No actions returned", raw: parsed });
 		}
 
 		res.json(parsed);
 
 	} catch (err) {
-		console.log("SERVER ERROR:", err);
+		console.log("SERVER ERROR:", err.message);
 		res.status(500).json({ error: err.message });
 	}
 });
