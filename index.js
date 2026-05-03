@@ -5,10 +5,70 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const API_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 10000;
+const API_KEY = process.env.GEMINI_API_KEY;
+
+const RULES = `
+You are a Roblox Studio AI builder.
+
+STRICT:
+- Return ONLY valid JSON
+- No markdown
+- No explanations
+- Must be valid JSON.parse()
+
+FORMAT:
+{
+  "actions": [
+    {
+      "type": "create | set | delete",
+      "class": "Instance class name",
+      "name": "object name",
+      "parent": "Workspace | StarterGui | StarterPack",
+      "properties": {},
+      "children": []
+    }
+  ]
+}
+
+GENERAL RULES:
+- Always use valid Roblox classes
+- Always use correct hierarchy
+- Use children for nesting
+- Do not invent properties
+
+PART RULES:
+- Parts must be Anchored = true unless specified
+- Use Size [x,y,z]
+- Use Position [x,y,z]
+
+SCRIPT RULES:
+- Scripts must include Source
+- Source must be valid Lua code
+
+TOOL RULES:
+- Tools go in StarterPack
+- Must include Handle (Part)
+
+UI RULES:
+- ScreenGui → Frame → TextLabel
+- Use UDim2 for size/position
+
+PARTICLE RULES:
+- Use ParticleEmitter
+- Must be parented to a Part
+- Include Rate, Lifetime
+
+ANIMATION RULES (R6 ONLY):
+- KeyframeSequence → Keyframe → Pose
+- Must include HumanoidRootPart → Torso → limbs
+- Minimum 2 keyframes
+- Every Keyframe must include Time
+- Missing Torso = INVALID
+`;
 
 let lastCall = 0;
+let memory = [];
 
 app.get("/", (req, res) => {
     res.send("OK");
@@ -34,8 +94,8 @@ app.post("/generate", async (req, res) => {
     try {
         const now = Date.now();
 
-        if (now - lastCall < 2500) {
-            return res.json({ error: "Rate limited, wait a moment" });
+        if (now - lastCall < 2000) {
+            return res.json({ error: "Rate limited, wait..." });
         }
 
         lastCall = now;
@@ -51,162 +111,24 @@ app.post("/generate", async (req, res) => {
             return res.status(500).json({ error: "Missing API key" });
         }
 
-       const fullPrompt = `
-You are a Roblox Studio AI builder.
+       const examples = memory.slice(-5).map(e => `
+User: ${e.prompt}
+Output:
+${JSON.stringify(e.result)}
+`).join("\n");
 
-Return ONLY valid JSON.
-The response MUST be parseable by JSON.parse().
+const fullPrompt = `
+${RULES}
 
-STRICT RULES:
-- No markdown
-- No explanations
-- No comments
-- No text outside JSON
-- No trailing commas
+GOOD EXAMPLES:
+${examples}
 
-========================
-OUTPUT FORMAT
+CONTEXT:
+Selected: ${selected || "none"}
 
-{
-  "actions": [
-    {
-      "type": "create | set | delete",
-      "class": "Instance class name",
-      "name": "object name",
-      "parent": "Workspace | StarterGui | StarterPack",
-      "target": "path",
-      "properties": {},
-      "children": []
-    }
-  ]
-}
-
-========================
-GENERAL RULES
-
-- Always return "actions"
-- Use valid Roblox class names
-- Use correct property names
-- Use "children" for hierarchy
-- Do not invent properties
-
-========================
-ANIMATION RULES (R6 ONLY)
-
-If user requests R15:
-Return:
-{ "error": "Only R6 animations are supported" }
-
-REQUIRED HIERARCHY:
-
-KeyframeSequence
-  → Keyframe (MUST include Time)
-    → Pose "HumanoidRootPart"
-      → Pose "Torso"
-        → Pose "Left Arm"
-        → Pose "Right Arm"
-        → Pose "Left Leg"
-        → Pose "Right Leg"
-
-CRITICAL:
-
-- Torso is MANDATORY
-- HumanoidRootPart MUST contain Torso
-- Limbs MUST be inside Torso
-- Minimum 2 Keyframes
-- Every Keyframe MUST have "Time"
-- Missing Torso = INVALID OUTPUT
-
-========================
-EASING RULES
-
-- Only apply easing to Pose
-- Do NOT apply easing to Keyframe or KeyframeSequence
-
-EasingDirection:
-"In", "Out", "InOut", "OutIn"
-
-EasingStyle:
-"Linear", "Bounce", "Elastic", "Cubic"
-
-========================
-TRANSFORM RULES
-
-- Position: [x, y, z]
-- Orientation: [x, y, z]
-
-========================
-VALID EXAMPLE (DO NOT BREAK STRUCTURE)
-
-{
-  "actions": [
-    {
-      "type": "create",
-      "class": "KeyframeSequence",
-      "name": "Example",
-      "parent": "Workspace",
-      "children": [
-        {
-          "class": "Keyframe",
-          "name": "Start",
-          "properties": { "Time": 0 },
-          "children": [
-            {
-              "class": "Pose",
-              "name": "HumanoidRootPart",
-              "children": [
-                {
-                  "class": "Pose",
-                  "name": "Torso",
-                  "children": [
-                    { "class": "Pose", "name": "Left Arm" },
-                    { "class": "Pose", "name": "Right Arm" },
-                    { "class": "Pose", "name": "Left Leg" },
-                    { "class": "Pose", "name": "Right Leg" }
-                  ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "class": "Keyframe",
-          "name": "End",
-          "properties": { "Time": 1 },
-          "children": [
-            {
-              "class": "Pose",
-              "name": "HumanoidRootPart",
-              "children": [
-                {
-                  "class": "Pose",
-                  "name": "Torso",
-                  "children": [
-                    { "class": "Pose", "name": "Left Arm" },
-                    { "class": "Pose", "name": "Right Arm" },
-                    { "class": "Pose", "name": "Left Leg" },
-                    { "class": "Pose", "name": "Right Leg" }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
-
-========================
-CONTEXT
-
-Selected:
-${selected || "none"}
-
-User request:
+USER REQUEST:
 ${prompt}
 `;
-
         const response = await fetch(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
             {
@@ -218,9 +140,7 @@ ${prompt}
                 body: JSON.stringify({
                     contents: [
                         {
-                            parts: [
-                                { text: fullPrompt }
-                            ]
+                            parts: [{ text: fullPrompt }]
                         }
                     ]
                 })
@@ -259,6 +179,25 @@ ${prompt}
             error: err.message
         });
     }
+});
+
+app.post("/feedback", (req, res) => {
+    const { rating, prompt, result } = req.body;
+
+    if (rating === "good" && prompt && result) {
+        memory.push({
+            prompt,
+            result
+        });
+
+        if (memory.length > 50) {
+            memory.shift();
+        }
+    }
+
+    res.json({
+        status: "Feedback received. This helps improve future AI results."
+    });
 });
 
 app.listen(PORT, () => {
