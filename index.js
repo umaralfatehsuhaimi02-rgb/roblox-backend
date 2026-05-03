@@ -11,33 +11,72 @@ app.get("/", (req, res) => {
     res.send("OK");
 });
 
-function cleanJSON(text) {
+function extractJSON(text) {
     text = text
         .replace(/```json/g, "")
         .replace(/```/g, "")
-        .replace(/\n/g, "")
         .trim();
 
     const start = text.indexOf("{");
     const end = text.lastIndexOf("}");
 
     if (start !== -1 && end !== -1) {
-        text = text.substring(start, end + 1);
+        return text.substring(start, end + 1);
     }
 
     return text;
 }
 
-function validateActions(data) {
+async function callGemini(prompt) {
+    const response = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-goog-api-key": API_KEY
+            },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        }
+    );
+
+    const raw = await response.json();
+    return raw?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function generateWithRetry(basePrompt) {
+    let text = await callGemini(basePrompt);
+    text = extractJSON(text);
+
+    try {
+        return JSON.parse(text);
+    } catch {}
+
+    const repairPrompt = `
+Fix this JSON. Return ONLY valid JSON. Do not explain.
+
+${text}
+`;
+
+    let fixed = await callGemini(repairPrompt);
+    fixed = extractJSON(fixed);
+
+    try {
+        return JSON.parse(fixed);
+    } catch {}
+
+    throw new Error("Failed to produce valid JSON");
+}
+
+function validate(data) {
     if (!data || typeof data !== "object") return false;
     if (!Array.isArray(data.actions)) return false;
 
-    for (const action of data.actions) {
-        if (!action.type) return false;
-
-        if (action.type === "create") {
-            if (!action.class) return false;
-        }
+    for (const a of data.actions) {
+        if (!a.type) return false;
+        if (a.type === "create" && !a.class) return false;
     }
 
     return true;
@@ -55,17 +94,13 @@ app.post("/generate", async (req, res) => {
         const fullPrompt = `
 You are a Roblox Studio AI builder.
 
-You MUST return ONLY valid JSON.
+Return ONLY valid JSON.
 
-STRICT RULES:
-- NO markdown
-- NO backticks
-- NO explanations
-- NO comments
-- NO trailing commas
-- NO text outside JSON
-
-The response MUST be parseable by JSON.parse().
+STRICT:
+- No markdown
+- No explanations
+- No text outside JSON
+- Must be valid JSON.parse()
 
 ========================
 FORMAT:
@@ -85,44 +120,140 @@ FORMAT:
 }
 
 ========================
-SUPPORTED TYPES
+ANIMATION RULES (R6 ONLY)
 
-- boolean
-- number
-- Vector3 → [x,y,z]
-- Color3 → [r,g,b]
-- NumberRange → [min,max]
-- UDim2 → [scaleX, offsetX, scaleY, offsetY]
-- Enum → string
+If user asks for R15:
+Return:
+{ "error": "Only R6 animations are supported" }
+
+You MUST follow this EXACT hierarchy:
+
+KeyframeSequence
+ → Keyframe (Time REQUIRED)
+   → Pose "HumanoidRootPart"
+     → Pose "Torso" (MANDATORY)
+       → Pose "Left Arm"
+       → Pose "Right Arm"
+       → Pose "Left Leg"
+       → Pose "Right Leg"
+
+CRITICAL REQUIREMENTS:
+
+- Torso MUST ALWAYS exist under HumanoidRootPart
+- If Torso is missing → OUTPUT IS INVALID
+- HumanoidRootPart MUST have Torso child
+- Limbs MUST be inside Torso (not directly under root)
+
+- Minimum 2 Keyframes required
+- Every Keyframe MUST include "Time"
 
 ========================
-SYSTEMS
+EASING RULES
 
-PARTS:
-- Part
-- Anchored, Size, Position, Color, Material
+- ONLY apply to Pose
+- NEVER apply to Keyframe
 
-PARTICLES:
-- ParticleEmitter inside Part
-- Rate, Lifetime, Speed, Size, Color
+EasingDirection:
+"In", "Out", "InOut", "OutIn"
 
-UI:
-- ScreenGui → Frame → TextButton/TextLabel
-- Size [scaleX, offsetX, scaleY, offsetY]
+EasingStyle:
+"Linear", "Bounce", "Elastic", "Cubic"
 
-TOOLS:
-- Tool in StarterPack
-- Must include Handle Part
+========================
+TRANSFORMS
 
-ANIMATION (R6 ONLY):
-- KeyframeSequence → Keyframe → Pose
-- Must include Time
-- Must include HumanoidRootPart → Torso → limbs
+- Position [x,y,z]
+- Orientation [x,y,z]
 
-EASING:
-- Only on Pose
-- EasingStyle: Linear, Bounce, Elastic, Cubic
-- EasingDirection: In, Out, InOut, OutIn
+========================
+VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "KeyframeSequence",
+      "name": "Example",
+      "parent": "Workspace",
+      "children": [
+        {
+          "class": "Keyframe",
+          "name": "Start",
+          "properties": {
+            "Time": 0
+          },
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "children": [
+                    {
+                      "class": "Pose",
+                      "name": "Left Arm"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Arm"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Left Leg"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Leg"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "Keyframe",
+          "name": "End",
+          "properties": {
+            "Time": 1
+          },
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "children": [
+                    {
+                      "class": "Pose",
+                      "name": "Left Arm"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Arm"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Left Leg"
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Leg"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
 
 ========================
 
@@ -133,56 +264,16 @@ User request:
 ${prompt}
 `;
 
-        const response = await fetch(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-goog-api-key": API_KEY
-                },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: fullPrompt }] }]
-                })
-            }
-        );
+        const result = await generateWithRetry(fullPrompt);
 
-        const raw = await response.text();
-
-        let parsedAPI;
-        try {
-            parsedAPI = JSON.parse(raw);
-        } catch {
-            return res.json({ error: "Bad API response", raw });
+        if (!validate(result)) {
+            return res.json({ error: "Invalid structure", raw: result });
         }
 
-        let text = parsedAPI?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
-        text = cleanJSON(text);
-
-        let final;
-        try {
-            final = JSON.parse(text);
-        } catch {
-            return res.json({
-                error: "Invalid JSON from AI",
-                raw: text
-            });
-        }
-
-        if (!validateActions(final)) {
-            return res.json({
-                error: "Invalid action structure",
-                raw: final
-            });
-        }
-
-        res.json(final);
+        res.json(result);
 
     } catch (err) {
-        res.status(500).json({
-            error: err.message
-        });
+        res.status(500).json({ error: err.message });
     }
 });
 
