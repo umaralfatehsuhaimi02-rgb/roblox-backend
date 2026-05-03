@@ -27,6 +27,8 @@ app.post("/generate", async (req, res) => {
         const fullPrompt = `
 You are a Roblox AI builder.
 
+Please check every line of script that you've make.
+
 Return ONLY valid JSON in this format:
 
 {
@@ -37,7 +39,16 @@ Return ONLY valid JSON in this format:
       "name": "object name",
       "parent": "Workspace",
       "target": "Workspace.ObjectName",
-      "properties": {}
+      "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "Size": [x, y, z],
+          "Position": [x, y, z],
+          "Color": [r, g, b],
+          "Material": "Neon",
+          "Transparency": 0
+      }
+      
     }
   ]
 }
@@ -49,6 +60,11 @@ Rules:
 - Vector3 = [x, y, z]
 - Color3 = [r, g, b] (0–1)
 - NumberRange = [min, max]
+- To access stuff like services and more, use "" and not ''
+- If a player asks to make them a model, please use all the properties such as like material, color, etc.
+- Dont make non-existent properties.
+- If you are not sure about the shape of the requested object, please search for a reference
+- Use correct roblox properties
 
 If a selected object is provided, prefer modifying it.
 
