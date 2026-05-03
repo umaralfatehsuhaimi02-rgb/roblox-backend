@@ -6,6 +6,9 @@ app.use(cors());
 app.use(express.json());
 
 const API_KEY = process.env.GEMINI_API_KEY;
+const PORT = process.env.PORT || 10000;
+
+let lastCall = 0;
 
 app.get("/", (req, res) => {
     res.send("OK");
@@ -27,63 +30,16 @@ function extractJSON(text) {
     return text;
 }
 
-async function callGemini(prompt) {
-    const response = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-goog-api-key": API_KEY
-            },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        }
-    );
-
-    const raw = await response.json();
-    return raw?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-}
-
-async function generateWithRetry(basePrompt) {
-    let text = await callGemini(basePrompt);
-    text = extractJSON(text);
-
-    try {
-        return JSON.parse(text);
-    } catch {}
-
-    const repairPrompt = `
-Fix this JSON. Return ONLY valid JSON. Do not explain.
-
-${text}
-`;
-
-    let fixed = await callGemini(repairPrompt);
-    fixed = extractJSON(fixed);
-
-    try {
-        return JSON.parse(fixed);
-    } catch {}
-
-    throw new Error("Failed to produce valid JSON");
-}
-
-function validate(data) {
-    if (!data || typeof data !== "object") return false;
-    if (!Array.isArray(data.actions)) return false;
-
-    for (const a of data.actions) {
-        if (!a.type) return false;
-        if (a.type === "create" && !a.class) return false;
-    }
-
-    return true;
-}
-
 app.post("/generate", async (req, res) => {
     try {
+        const now = Date.now();
+
+        if (now - lastCall < 2500) {
+            return res.json({ error: "Rate limited, wait a moment" });
+        }
+
+        lastCall = now;
+
         const prompt = req.body.prompt;
         const selected = req.body.selected;
 
@@ -91,19 +47,25 @@ app.post("/generate", async (req, res) => {
             return res.status(400).json({ error: "No prompt" });
         }
 
-        const fullPrompt = `
+        if (!API_KEY) {
+            return res.status(500).json({ error: "Missing API key" });
+        }
+
+       const fullPrompt = `
 You are a Roblox Studio AI builder.
 
 Return ONLY valid JSON.
+The response MUST be parseable by JSON.parse().
 
-STRICT:
+STRICT RULES:
 - No markdown
 - No explanations
+- No comments
 - No text outside JSON
-- Must be valid JSON.parse()
+- No trailing commas
 
 ========================
-FORMAT:
+OUTPUT FORMAT
 
 {
   "actions": [
@@ -120,38 +82,46 @@ FORMAT:
 }
 
 ========================
+GENERAL RULES
+
+- Always return "actions"
+- Use valid Roblox class names
+- Use correct property names
+- Use "children" for hierarchy
+- Do not invent properties
+
+========================
 ANIMATION RULES (R6 ONLY)
 
-If user asks for R15:
+If user requests R15:
 Return:
 { "error": "Only R6 animations are supported" }
 
-You MUST follow this EXACT hierarchy:
+REQUIRED HIERARCHY:
 
 KeyframeSequence
- → Keyframe (Time REQUIRED)
-   → Pose "HumanoidRootPart"
-     → Pose "Torso" (MANDATORY)
-       → Pose "Left Arm"
-       → Pose "Right Arm"
-       → Pose "Left Leg"
-       → Pose "Right Leg"
+  → Keyframe (MUST include Time)
+    → Pose "HumanoidRootPart"
+      → Pose "Torso"
+        → Pose "Left Arm"
+        → Pose "Right Arm"
+        → Pose "Left Leg"
+        → Pose "Right Leg"
 
-CRITICAL REQUIREMENTS:
+CRITICAL:
 
-- Torso MUST ALWAYS exist under HumanoidRootPart
-- If Torso is missing → OUTPUT IS INVALID
-- HumanoidRootPart MUST have Torso child
-- Limbs MUST be inside Torso (not directly under root)
-
-- Minimum 2 Keyframes required
-- Every Keyframe MUST include "Time"
+- Torso is MANDATORY
+- HumanoidRootPart MUST contain Torso
+- Limbs MUST be inside Torso
+- Minimum 2 Keyframes
+- Every Keyframe MUST have "Time"
+- Missing Torso = INVALID OUTPUT
 
 ========================
 EASING RULES
 
-- ONLY apply to Pose
-- NEVER apply to Keyframe
+- Only apply easing to Pose
+- Do NOT apply easing to Keyframe or KeyframeSequence
 
 EasingDirection:
 "In", "Out", "InOut", "OutIn"
@@ -160,13 +130,13 @@ EasingStyle:
 "Linear", "Bounce", "Elastic", "Cubic"
 
 ========================
-TRANSFORMS
+TRANSFORM RULES
 
-- Position [x,y,z]
-- Orientation [x,y,z]
+- Position: [x, y, z]
+- Orientation: [x, y, z]
 
 ========================
-VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
+VALID EXAMPLE (DO NOT BREAK STRUCTURE)
 
 {
   "actions": [
@@ -179,9 +149,7 @@ VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
         {
           "class": "Keyframe",
           "name": "Start",
-          "properties": {
-            "Time": 0
-          },
+          "properties": { "Time": 0 },
           "children": [
             {
               "class": "Pose",
@@ -191,22 +159,10 @@ VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
                   "class": "Pose",
                   "name": "Torso",
                   "children": [
-                    {
-                      "class": "Pose",
-                      "name": "Left Arm"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Right Arm"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Left Leg"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Right Leg"
-                    }
+                    { "class": "Pose", "name": "Left Arm" },
+                    { "class": "Pose", "name": "Right Arm" },
+                    { "class": "Pose", "name": "Left Leg" },
+                    { "class": "Pose", "name": "Right Leg" }
                   ]
                 }
               ]
@@ -216,9 +172,7 @@ VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
         {
           "class": "Keyframe",
           "name": "End",
-          "properties": {
-            "Time": 1
-          },
+          "properties": { "Time": 1 },
           "children": [
             {
               "class": "Pose",
@@ -228,22 +182,10 @@ VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
                   "class": "Pose",
                   "name": "Torso",
                   "children": [
-                    {
-                      "class": "Pose",
-                      "name": "Left Arm"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Right Arm"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Left Leg"
-                    },
-                    {
-                      "class": "Pose",
-                      "name": "Right Leg"
-                    }
+                    { "class": "Pose", "name": "Left Arm" },
+                    { "class": "Pose", "name": "Right Arm" },
+                    { "class": "Pose", "name": "Left Leg" },
+                    { "class": "Pose", "name": "Right Leg" }
                   ]
                 }
               ]
@@ -256,6 +198,7 @@ VALID ANIMATION EXAMPLE (DO NOT BREAK STRUCTURE)
 }
 
 ========================
+CONTEXT
 
 Selected:
 ${selected || "none"}
@@ -264,20 +207,60 @@ User request:
 ${prompt}
 `;
 
-        const result = await generateWithRetry(fullPrompt);
+        const response = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-goog-api-key": API_KEY
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            parts: [
+                                { text: fullPrompt }
+                            ]
+                        }
+                    ]
+                })
+            }
+        );
 
-        if (!validate(result)) {
-            return res.json({ error: "Invalid structure", raw: result });
+        if (response.status === 429) {
+            return res.json({ error: "Gemini rate limited (429)" });
         }
 
-        res.json(result);
+        const data = await response.json();
+
+        let text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!text) {
+            return res.json({ error: "No response from AI", raw: data });
+        }
+
+        text = extractJSON(text);
+
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        } catch {
+            return res.json({
+                error: "Invalid JSON from AI",
+                raw: text
+            });
+        }
+
+        res.json(parsed);
 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.log("SERVER ERROR:", err);
+        res.status(500).json({
+            error: err.message
+        });
     }
 });
 
-const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log("Running on port " + PORT);
 });
