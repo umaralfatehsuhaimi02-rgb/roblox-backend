@@ -168,33 +168,45 @@ Example:
 }
 
 ========================
+KEYFRAME SEQUENCE RULES (R6 ONLY)
 
-KEYFRAME SEQUENCE RULES:
+-If the user asks for R15 respond them:
+"Error, R15 not supported"
 
-- easing DIRECTIONS: "In", "Out", "InOut", "OutIn" -- all of these are enums: Enum.EasingDirection
-- easing STYLES: "Bounce", "Constant", "CubicV2", "Cubic", "Elastic", "Linear" -- all of these are enums: Enum.EasingStyle
+You MUST follow this EXACT structure.
 
-- HumanoidRootParts properties such as "EasingStyle", "EasingDirection", "CFrame", "Orientation" etc DOES NOT need to be changed
+- Only R6 rigs are supported
+- Required limbs:
+  "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"
+- Root must be "HumanoidRootPart"
+- Every Keyframe MUST have "Time"
+- Use at least 2 keyframes
+- Use children hierarchy EXACTLY as shown
 
-- Limbs: "Left Arm", "Right Arm", "Left Leg", and "Right Leg". Torso is Mandatory
+Easing enums:
+- EasingDirection: "In", "Out", "InOut", "OutIn"
+- EasingStyle: "Linear", "Bounce", "Elastic", "Cubic"
 
-- You can set the EasingDirection to be more smooth
+Position = [x,y,z]
+Orientation = [x,y,z]
 
--If a player tries to make an R15 animation, say that you are only supported R6
-
-Happy Emote example:
+========================
+VALID EXAMPLE:
 
 {
   "actions": [
     {
       "type": "create",
       "class": "KeyframeSequence",
-      "parent": "workspace",
+      "name": "Wave",
+      "parent": "Workspace",
       "children": [
         {
           "class": "Keyframe",
-          "name": "WindUp",
-          "properties": {},
+          "name": "Start",
+          "properties": {
+            "Time": 0
+          },
           "children": [
             {
               "class": "Pose",
@@ -207,79 +219,68 @@ Happy Emote example:
                 {
                   "class": "Pose",
                   "name": "Torso",
-                  "properties": {
-                     "EasingStyle": "Linear",
-                     "EasingDirection": "In"
-                   },
-                   "children": [
-                      {
-                        "class": "Pose"
-                        "name": "Left Arm",
-                        "properties": {
-                           "Position": [-0.283,-0.283,0],
-                           "Orientation": [0,0,-44.999]
-                        }
-                      },
-
-                      {
-                        "class": "Pose"
-                        "name": "Right Arm",
-                        "properties": {
-                           "Position": [0.354,-0.354,0],
-                           "Orientation": [0,0,44.999]
-                        }
+                  "children": [
+                    {
+                      "class": "Pose",
+                      "name": "Left Arm",
+                      "properties": {
+                        "Orientation": [0,0,-45]
                       }
-                   ]
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Arm",
+                      "properties": {
+                        "Orientation": [0,0,45]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "class": "Keyframe",
+          "name": "End",
+          "properties": {
+            "Time": 1
+          },
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "properties": {
+                "EasingStyle": "Linear",
+                "EasingDirection": "Out"
+              },
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "children": [
+                    {
+                      "class": "Pose",
+                      "name": "Left Arm",
+                      "properties": {
+                        "Orientation": [0,0,-170]
+                      }
+                    },
+                    {
+                      "class": "Pose",
+                      "name": "Right Arm",
+                      "properties": {
+                        "Orientation": [0,0,170]
+                      }
+                    }
+                  ]
+                }
               ]
             }
           ]
         }
       ]
-    },
-
-    {
-          "class": "Keyframe",
-          "name": "HaveUp",
-          "properties": {},
-          "children": [
-            {
-              "class": "Pose",
-              "name": "HumanoidRootPart",
-              "properties": {
-                "EasingStyle": "Linear",
-                "EasingDirection": "In"
-              },
-              "children": [
-                {
-                  "class": "Pose",
-                  "name": "Torso",
-                  "properties": {
-                     "EasingStyle": "Linear",
-                     "EasingDirection": "In"
-                   },
-                   "children": [
-                      {
-                        "class": "Pose"
-                        "name": "Left Arm",
-                        "properties": {
-                           "Position": [-0.283,-0.283,0],
-                           "Orientation": [0,0,-175.006]
-                        }
-                      },
-
-                      {
-                        "class": "Pose"
-                        "name": "Right Arm",
-                        "properties": {
-                           "Position": [0.354,-0.354,0],
-                           "Orientation": [0,0,175.006]
-                        }
-                      }
-                   ]
-              ]
-            }
-          ]
-        }
+    }
   ]
 }
 
