@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 app.use(cors());
@@ -24,44 +25,66 @@ function extractJSON(text) {
 }
 
 async function callGemini(prompt) {
-	const res = await fetch(
-		"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
-		{
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				"X-goog-api-key": GEMINI_KEY
-			},
-			body: JSON.stringify({
-				contents: [{ parts: [{ text: prompt }] }]
-			})
-		}
-	);
+	try {
+		const res = await fetch(
+			"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"X-goog-api-key": GEMINI_KEY
+				},
+				body: JSON.stringify({
+					contents: [{ parts: [{ text: prompt }] }]
+				})
+			}
+		);
 
-	const data = await res.json();
-	let text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-	return text;
+		const data = await res.json();
+		let text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+		console.log("Gemini:", text);
+
+		return text;
+	} catch (err) {
+		console.log("Gemini error:", err);
+		return null;
+	}
 }
 
 async function callOpenRouter(prompt) {
-	const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${OPENROUTER_KEY}`,
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify({
-			model: "deepseek/deepseek-chat",
-			messages: [
-				{ role: "system", content: "Return ONLY valid JSON." },
-				{ role: "user", content: prompt }
-			]
-		})
-	});
+	try {
+		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${OPENROUTER_KEY}`,
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				model: "deepseek/deepseek-chat",
+				messages: [
+					{ role: "system", content: "Return ONLY valid JSON." },
+					{ role: "user", content: prompt }
+				]
+			})
+		});
 
-	const data = await res.json();
-	let text = data?.choices?.[0]?.message?.content;
-	return text;
+		const data = await res.json();
+
+		if (!res.ok) {
+			console.log("OpenRouter error:", data);
+			return null;
+		}
+
+		let text = data?.choices?.[0]?.message?.content;
+
+		console.log("OpenRouter:", text);
+
+		return text;
+	} catch (err) {
+		console.log("OpenRouter crash:", err);
+		return null;
+	}
 }
 
 function buildPrompt(userPrompt, selected) {
@@ -84,10 +107,14 @@ User: ${userPrompt}
 `;
 }
 
+app.get("/", (req, res) => {
+	res.send("OK");
+});
+
 app.post("/generate", async (req, res) => {
 	try {
 		const now = Date.now();
-		if (now - lastCall < 1500) {
+		if (now - lastCall < 500) {
 			return res.json({ error: "Rate limited" });
 		}
 		lastCall = now;
@@ -95,30 +122,32 @@ app.post("/generate", async (req, res) => {
 		const { prompt, selected } = req.body;
 		const fullPrompt = buildPrompt(prompt, selected);
 
-		let text;
+		let text = await callGemini(fullPrompt);
 
-		try {
-			text = await callGemini(fullPrompt);
-		} catch {
-			text = null;
+		if (!text || text.length < 10) {
+			console.log("Falling back to OpenRouter");
+			text = await callOpenRouter(fullPrompt);
 		}
 
 		if (!text) {
-			text = await callOpenRouter(fullPrompt);
+			return res.json({ error: "All models failed" });
 		}
 
 		text = extractJSON(text);
 
 		let parsed;
+
 		try {
 			parsed = JSON.parse(text);
-		} catch {
+		} catch (e) {
+			console.log("INVALID JSON:", text);
 			return res.json({ error: "Invalid JSON", raw: text });
 		}
 
 		res.json(parsed);
 
 	} catch (err) {
+		console.log("SERVER ERROR:", err);
 		res.status(500).json({ error: err.message });
 	}
 });
