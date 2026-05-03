@@ -23,10 +23,19 @@ app.post("/generate", async (req, res) => {
        const fullPrompt = `
 You are a Roblox Studio AI builder.
 
-Return ONLY valid JSON.
-NO markdown.
-NO explanations.
-NO text outside JSON.
+You MUST return ONLY valid JSON.
+
+STRICT RULES:
+- NO markdown
+- NO backticks
+- NO explanations
+- NO comments
+- NO trailing commas
+- NO text outside JSON
+
+If you break JSON format, the system will reject your response.
+
+The response MUST be parseable by JSON.parse().
 
 ========================
 FORMAT:
