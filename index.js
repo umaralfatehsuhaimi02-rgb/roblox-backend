@@ -8,8 +8,7 @@ app.use(express.json());
 const API_KEY = process.env.GEMINI_API_KEY;
 
 app.get("/", (req, res) => {
-    console.log("PING");
-    res.send("Server is alive");
+    res.send("OK");
 });
 
 app.post("/generate", async (req, res) => {
@@ -22,15 +21,12 @@ app.post("/generate", async (req, res) => {
         }
 
         const fullPrompt = `
-You are a Roblox AI builder.
+You are a Roblox Studio AI builder.
 
-You MUST return ONLY valid JSON.
-
-NO explanations.
+Return ONLY valid JSON.
 NO markdown.
-ONLY JSON.
+NO explanations.
 
-========================
 FORMAT:
 
 {
@@ -39,100 +35,58 @@ FORMAT:
       "type": "create | set | delete",
       "class": "Instance class name",
       "name": "object name",
-      "parent": "Workspace",
-      "target": "Workspace.ObjectName",
+      "parent": "Workspace | StarterGui | StarterPack",
+      "target": "path",
       "properties": {},
       "children": []
     }
   ]
 }
 
-========================
-SUPPORTED PROPERTY TYPES:
+SUPPORTED TYPES:
 
 - boolean → true/false
 - number → 0.5
-- Vector3 → [x, y, z]
-- Color3 → [r, g, b] (0–1)
-- NumberRange → [min, max]
-- Enum → "Neon", "SmoothPlastic", etc.
+- Vector3 → [x,y,z]
+- Color3 → [r,g,b]
+- NumberRange → [min,max]
+- Enum → string
 
 ========================
-IMPORTANT RULES:
+PARTICLE EFFECT RULES
 
-- ALWAYS return valid JSON
-- ALWAYS include "actions"
-- NEVER include text outside JSON
-- Use correct Roblox class names
-- Use correct property names
-- Anchor parts unless told otherwise
-- Prefer modifying selected object if given
+Use ParticleEmitter inside a Part.
 
-========================
-HIERARCHY:
+Supported properties:
+- Rate (number)
+- Lifetime [min,max]
+- Speed [min,max]
+- Size [min,max]
+- Color [r,g,b]
+- Transparency (number)
 
-Use "children" to create nested objects.
+Example:
 
-========================
-EXAMPLES:
-
--- Create part
 {
   "actions": [
     {
       "type": "create",
       "class": "Part",
-      "name": "Platform",
+      "name": "FirePart",
       "parent": "Workspace",
       "properties": {
         "Anchored": true,
-        "Size": [10,1,10],
-        "Position": [0,5,0],
-        "Material": "Neon",
-        "Color": [0,0,1]
-      }
-    }
-  ]
-}
-
--- UI Example
-{
-  "actions": [
-    {
-      "type": "create",
-      "class": "ScreenGui",
-      "parent": "StarterGui",
-      "children": [
-        {
-          "class": "TextButton",
-          "name": "Button",
-          "properties": {
-            "Text": "Click Me",
-            "Size": [0.3,0,0.1,0]
-          }
-        }
-      ]
-    }
-  ]
-}
-
--- Particle Example
-{
-  "actions": [
-    {
-      "type": "create",
-      "class": "Part",
-      "name": "EmitterPart",
-      "parent": "Workspace",
-      "properties": {
-        "Anchored": true
+        "Position": [0,5,0]
       },
       "children": [
         {
           "class": "ParticleEmitter",
           "properties": {
             "Rate": 50,
-            "Lifetime": [1,2]
+            "Lifetime": [1,2],
+            "Speed": [5,10],
+            "Color": [1,0.5,0],
+            "Size": [1,2]
           }
         }
       ]
@@ -140,33 +94,13 @@ EXAMPLES:
   ]
 }
 
--- Animation Example
-{
-  "actions": [
-    {
-      "type": "create",
-      "class": "KeyframeSequence",
-      "name": "SimpleAnim",
-      "parent": "Workspace",
-      "children": [
-        {
-          "class": "Keyframe",
-          "properties": { "Time": 0 },
-          "children": [
-            {
-              "class": "Pose",
-              "properties": {
-                "Name": "Torso"
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
+========================
+TOOL RULES
 
--- Tool Example
+Use Tool with Handle part.
+
+Example:
+
 {
   "actions": [
     {
@@ -188,6 +122,177 @@ EXAMPLES:
 }
 
 ========================
+UI RULES
+
+Use ScreenGui → UI elements.
+
+Supported classes:
+- ScreenGui
+- Frame
+- TextLabel
+- TextButton
+
+UI Size format:
+- [scaleX, offsetX, scaleY, offsetY]
+
+Example:
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "ScreenGui",
+      "parent": "StarterGui",
+      "children": [
+        {
+          "class": "Frame",
+          "name": "MainFrame",
+          "properties": {
+            "Size": [0.3,0,0.3,0],
+            "BackgroundColor3": [0,0,0]
+          },
+          "children": [
+            {
+              "class": "TextButton",
+              "name": "PlayButton",
+              "properties": {
+                "Text": "Play",
+                "Size": [1,0,0.3,0]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+========================
+
+KEYFRAME SEQUENCE RULES:
+
+- easing DIRECTIONS: "In", "Out", "InOut", "OutIn" -- all of these are enums: Enum.EasingDirection
+- easing STYLES: "Bounce", "Constant", "CubicV2", "Cubic", "Elastic", "Linear" -- all of these are enums: Enum.EasingStyle
+
+- HumanoidRootParts properties such as "EasingStyle", "EasingDirection", "CFrame", "Orientation" etc DOES NOT need to be changed
+
+- Limbs: "Left Arm", "Right Arm", "Left Leg", and "Right Leg". Torso is Mandatory
+
+- You can set the EasingDirection to be more smooth
+
+-If a player tries to make an R15 animation, say that you are only supported R6
+
+Happy Emote example:
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "KeyframeSequence",
+      "parent": "workspace",
+      "children": [
+        {
+          "class": "Keyframe",
+          "name": "WindUp",
+          "properties": {},
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "properties": {
+                "EasingStyle": "Linear",
+                "EasingDirection": "In"
+              },
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "properties": {
+                     "EasingStyle": "Linear",
+                     "EasingDirection": "In"
+                   },
+                   "children": [
+                      {
+                        "class": "Pose"
+                        "name": "Left Arm",
+                        "properties": {
+                           "Position": [-0.283,-0.283,0],
+                           "Orientation": [0,0,-44.999]
+                        }
+                      },
+
+                      {
+                        "class": "Pose"
+                        "name": "Right Arm",
+                        "properties": {
+                           "Position": [0.354,-0.354,0],
+                           "Orientation": [0,0,44.999]
+                        }
+                      }
+                   ]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+          "class": "Keyframe",
+          "name": "HaveUp",
+          "properties": {},
+          "children": [
+            {
+              "class": "Pose",
+              "name": "HumanoidRootPart",
+              "properties": {
+                "EasingStyle": "Linear",
+                "EasingDirection": "In"
+              },
+              "children": [
+                {
+                  "class": "Pose",
+                  "name": "Torso",
+                  "properties": {
+                     "EasingStyle": "Linear",
+                     "EasingDirection": "In"
+                   },
+                   "children": [
+                      {
+                        "class": "Pose"
+                        "name": "Left Arm",
+                        "properties": {
+                           "Position": [-0.283,-0.283,0],
+                           "Orientation": [0,0,-175.006]
+                        }
+                      },
+
+                      {
+                        "class": "Pose"
+                        "name": "Right Arm",
+                        "properties": {
+                           "Position": [0.354,-0.354,0],
+                           "Orientation": [0,0,175.006]
+                        }
+                      }
+                   ]
+              ]
+            }
+          ]
+        }
+  ]
+}
+
+================================================
+
+GENERAL RULES
+
+- If a models orientation needs to be changed, gets the models pivot, use CFrame.Angles and use PivotTo
+- ALWAYS return JSON
+- ALWAYS include actions
+- USE children for hierarchy
+- DO NOT include invalid properties
+- Anchor parts unless told otherwise
 
 Selected:
 ${selected || "none"}
@@ -237,7 +342,6 @@ ${prompt}
         res.json(parsed);
 
     } catch (err) {
-        console.log("SERVER ERROR:", err);
         res.status(500).json({ error: err.message });
     }
 });
