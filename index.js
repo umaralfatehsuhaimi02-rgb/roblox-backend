@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 10000;
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
+const GROQ_KEY = process.env.GROQ_API_KEY;
 
-let memory = [];
 let lastCall = 0;
 
 function buildPrompt(userPrompt, selected) {
@@ -264,6 +264,7 @@ ${userPrompt}
 `;
 }
 
+
 function extractJSON(text) {
 	if (!text) return null;
 	text = text.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -272,19 +273,123 @@ function extractJSON(text) {
 	if (start !== -1 && end !== -1) {
 		return text.substring(start, end + 1);
 	}
-	return text;
+	return null;
 }
 
-async function safeCall(fn, prompt) {
+async function safeCall(fn) {
 	try {
-		return await fn(prompt);
+		return await fn();
 	} catch (err) {
-		console.log("Call failed:", err.message);
+		console.log("Provider crash:", err.message);
+		return null;
+	}
+}
+
+// ==================== PROVIDERS ====================
+
+async function callGroq(prompt) {
+	if (!GROQ_KEY) return null;
+
+	try {
+		const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${GROQ_KEY}`,
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				model: "llama3-8b-8192",
+				temperature: 0.2,
+				messages: [
+					{
+						role: "system",
+						content: "Return ONLY valid JSON. No extra text."
+					},
+					{
+						role: "user",
+						content: prompt
+					}
+				]
+			})
+		});
+
+		const data = await res.json();
+
+		if (!res.ok) {
+			console.log("Groq error:", data);
+			return null;
+		}
+
+		let text = data?.choices?.[0]?.message?.content;
+
+		console.log("Groq:", text);
+
+		if (text && !text.trim().startsWith("{")) {
+			const start = text.indexOf("{");
+			const end = text.lastIndexOf("}");
+			if (start !== -1 && end !== -1) {
+				text = text.substring(start, end + 1);
+			}
+		}
+
+		return text;
+
+	} catch (err) {
+		console.log("Groq crash:", err.message);
+		return null;
+	}
+}
+
+async function callOpenRouter(prompt) {
+	if (!OPENROUTER_KEY) return null;
+
+	try {
+		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${OPENROUTER_KEY}`,
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify({
+				model: "qwen/qwen3-coder:free",
+				temperature: 0.2,
+				messages: [
+					{ role: "system", content: "Return ONLY valid JSON." },
+					{ role: "user", content: prompt }
+				]
+			})
+		});
+
+		const data = await res.json();
+
+		if (!res.ok) {
+			console.log("OpenRouter error:", data);
+			return null;
+		}
+
+		let text = data?.choices?.[0]?.message?.content;
+
+		console.log("OpenRouter:", text);
+
+		if (text && !text.trim().startsWith("{")) {
+			const start = text.indexOf("{");
+			const end = text.lastIndexOf("}");
+			if (start !== -1 && end !== -1) {
+				text = text.substring(start, end + 1);
+			}
+		}
+
+		return text;
+
+	} catch (err) {
+		console.log("OpenRouter crash:", err.message);
 		return null;
 	}
 }
 
 async function callGemini(prompt) {
+	if (!GEMINI_KEY) return null;
+
 	try {
 		const res = await fetch(
 			"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
@@ -315,50 +420,7 @@ async function callGemini(prompt) {
 	}
 }
 
-async function callOpenRouter(prompt) {
-	try {
-		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${OPENROUTER_KEY}`,
-				"Content-Type": "application/json",
-				"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
-				"X-Title": "Roblox AI Builder"
-			},
-			body: JSON.stringify({
-				model: "qwen/qwen3-coder:free",
-				temperature: 0.2,
-				messages: [
-					{ role: "system", content: "Return ONLY valid JSON." },
-					{ role: "user", content: prompt }
-				]
-			})
-		});
-
-		const data = await res.json();
-
-		if (!res.ok) {
-			console.log("OpenRouter error:", data);
-			return null;
-		}
-
-		let text = data?.choices?.[0]?.message?.content;
-
-		if (text && !text.trim().startsWith("{")) {
-			const start = text.indexOf("{");
-			const end = text.lastIndexOf("}");
-			if (start !== -1 && end !== -1) {
-				text = text.substring(start, end + 1);
-			}
-		}
-
-		return text;
-
-	} catch (err) {
-		console.log("Qwen crash:", err.message);
-		return null;
-	}
-}
+// ==================== ROUTES ====================
 
 app.get("/", (req, res) => {
 	res.send("OK");
@@ -367,7 +429,7 @@ app.get("/", (req, res) => {
 app.post("/generate", async (req, res) => {
 	try {
 		const now = Date.now();
-		if (now - lastCall < 1500) {
+		if (now - lastCall < 1200) {
 			return res.json({ error: "Slow down" });
 		}
 		lastCall = now;
@@ -376,15 +438,25 @@ app.post("/generate", async (req, res) => {
 
 		const fullPrompt = buildPrompt(prompt, selected);
 
-		let text = await safeCall(callGemini, fullPrompt);
+		const providers = [
+			() => callGroq(fullPrompt),
+			() => callOpenRouter(fullPrompt),
+			() => callGemini(fullPrompt)
+		];
 
-		if (!text || text.length < 10) {
-			console.log("Fallback to Qwen");
-			text = await safeCall(callOpenRouter, fullPrompt);
+		let text = null;
+
+		for (const provider of providers) {
+			text = await safeCall(provider);
+
+			if (text && text.length > 10) {
+				console.log("Provider success");
+				break;
+			}
 		}
 
 		if (!text) {
-			return res.json({ error: "All models failed" });
+			return res.json({ error: "All providers failed" });
 		}
 
 		text = extractJSON(text);
@@ -394,21 +466,12 @@ app.post("/generate", async (req, res) => {
 		try {
 			parsed = JSON.parse(text);
 		} catch {
-			let retry = await safeCall(callOpenRouter, fullPrompt);
-
-			if (retry) {
-				retry = extractJSON(retry);
-				try {
-					parsed = JSON.parse(retry);
-				} catch {}
-			}
+			console.log("JSON invalid");
+			return res.json({ error: "Invalid JSON", raw: text });
 		}
 
-		if (!parsed || !parsed.actions) {
-			return res.json({
-				error: "No actions returned",
-				raw: text
-			});
+		if (!parsed.actions) {
+			return res.json({ error: "No actions returned", raw: parsed });
 		}
 
 		res.json(parsed);
@@ -417,17 +480,6 @@ app.post("/generate", async (req, res) => {
 		console.log("SERVER ERROR:", err.message);
 		res.status(500).json({ error: err.message });
 	}
-});
-
-app.post("/feedback", (req, res) => {
-	const { rating, prompt, result } = req.body;
-
-	if (rating === "good") {
-		memory.push({ prompt, result });
-		if (memory.length > 50) memory.shift();
-	}
-
-	res.json({ ok: true });
 });
 
 app.listen(PORT, () => {
