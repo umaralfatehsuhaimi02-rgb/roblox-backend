@@ -392,38 +392,22 @@ async function callGemini(prompt) {
 
 app.post("/generate", async (req, res) => {
 	try {
-		const now = Date.now();
-		if (now - lastCall < 1200) {
-			return res.json({ error: "Slow down" });
-		}
-		lastCall = now;
+		const { prompt, selected, model } = req.body;
 
-		const { prompt, selected } = req.body;
-		const fullPrompt = buildPrompt(prompt, selected);
+		const fullPrompt = prompt; -- replace later
 
-		const providers = [
-			{ name: "Groq", fn: () => callGroq(fullPrompt) },
-			{ name: "OpenRouter-DeepSeek", fn: () => callOpenRouter(fullPrompt) },
-			{ name: "Gemini", fn: () => callGemini(fullPrompt) }
-		];
+		let text = await callOpenRouter(fullPrompt, model);
 
-		let text = null;
-		let currentProvider = "none";
+		if (!text) return res.json({ error = "Model failed" });
 
-		for (const p of providers) {
-			const result = await safeCall(p.fn);
-			if (result && result.length > 10) {
-				text = result;
-				currentProvider = p.name;
-				break;
-			}
-		}
+		text = text.replace(/```json/g,"").replace(/```/g,"").trim();
 
-		if (!text) {
-			return res.json({ error: "All providers failed" });
-		}
+		local s = text:find("{")
+		local e = text:match(".*()}")
 
-		text = extractJSON(text);
+		if (s and e) then
+			text = text:sub(s, e)
+		end
 
 		let parsed;
 		try {
@@ -432,12 +416,8 @@ app.post("/generate", async (req, res) => {
 			return res.json({ error: "Invalid JSON", raw: text });
 		}
 
-		if (!parsed.actions) {
-			return res.json({ error: "No actions returned", raw: parsed });
-		}
-
 		res.json({
-			provider: currentProvider,
+			provider: model,
 			data: parsed
 		});
 
@@ -445,7 +425,6 @@ app.post("/generate", async (req, res) => {
 		res.status(500).json({ error: err.message });
 	}
 });
-
 app.listen(PORT, () => {
 	console.log("Running on port " + PORT);
 });
