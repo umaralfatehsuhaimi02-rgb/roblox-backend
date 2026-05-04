@@ -192,20 +192,21 @@ app.post("/generate", async (req, res) => {
 	try {
 		const { prompt, selected, model } = req.body;
 
-		const fullPrompt = buildPrompt(prompt, selected);
+		const fullPrompt = buildPrompt(prompt, selected, memory);
 
-		const textRaw = await safeCall(() =>
-			callOpenRouter(fullPrompt, model)
-		);
+		let text = await safeCall(() => callOpenRouter(fullPrompt, model));
 
-		if (!textRaw) {
+		if (!text) {
 			return res.json({ error: "Model failed" });
 		}
 
-		const text = extractJSON(textRaw);
+		text = text.replace(/```json/g,"").replace(/```/g,"").trim();
 
-		if (!text) {
-			return res.json({ error: "No JSON found", raw: textRaw });
+		const start = text.indexOf("{");
+		const end = text.lastIndexOf("}");
+
+		if (start !== -1 && end !== -1) {
+			text = text.substring(start, end + 1);
 		}
 
 		let parsed;
@@ -215,16 +216,13 @@ app.post("/generate", async (req, res) => {
 			return res.json({ error: "Invalid JSON", raw: text });
 		}
 
-		if (!parsed.actions) {
-			return res.json({ error: "No actions returned", raw: parsed });
-		}
-
 		res.json({
-			provider: model || "OpenRouter",
+			provider: model,
 			data: parsed
 		});
 
 	} catch (err) {
+		console.log("SERVER CRASH:", err);
 		res.status(500).json({ error: err.message });
 	}
 });
