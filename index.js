@@ -211,6 +211,31 @@ async function callOpenRouter(prompt, model) {
 
 // ================= ROUTE =================
 
+let memory = [];
+
+app.post("/feedback", (req, res) => {
+	try {
+		const { rating, prompt, result } = req.body;
+
+		if (!rating || !prompt || !result) {
+			return res.json({ error: "Missing fields" });
+		}
+
+		if (rating === "good") {
+			memory.push({ prompt, result });
+
+			if (memory.length > 50) {
+				memory.shift();
+			}
+		}
+
+		res.json({ ok: true });
+
+	} catch (err) {
+		res.status(500).json({ error: err.message });
+	}
+});
+
 app.post("/generate", async (req, res) => {
 	try {
 		const { prompt, selected, model } = req.body;
