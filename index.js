@@ -351,7 +351,7 @@ async function callOpenRouter(prompt) {
 				"Content-Type": "application/json"
 			},
 			body: JSON.stringify({
-				model: "qwen/qwen3-coder:free",
+				model: "meta-llama/llama-3-8b-instruct",
 				temperature: 0.2,
 				messages: [
 					{ role: "system", content: "Return ONLY valid JSON." },
