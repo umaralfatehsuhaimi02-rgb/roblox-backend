@@ -398,7 +398,7 @@ app.post("/generate", async (req, res) => {
 
 		let text = await callOpenRouter(fullPrompt, model);
 
-		if (!text) return res.json({ error = "Model failed" });
+		if (!text) return res.json({ error: "Model failed" });
 
 		text = text.replace(/```json/g,"").replace(/```/g,"").trim();
 
