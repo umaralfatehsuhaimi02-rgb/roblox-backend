@@ -279,7 +279,7 @@ async function callOpenRouter(prompt) {
 					"X-Title": "Roblox AI Builder"
 				},
 				body: JSON.stringify({
-					model: "minimax/minimax-m2.5:free",
+					model: "openai/gpt-oss-120b:free",
 					temperature: 0.2,
 					messages: [
 						{
