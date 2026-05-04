@@ -223,7 +223,7 @@ function extractJSON(text) {
 	return text;
 }
 
-function fetchWithTimeout(url, options, timeout = 15000) {
+function fetchWithTimeout(url, options, timeout = 500000) {
 	return Promise.race([
 		fetch(url, options),
 		new Promise((_, reject) =>
