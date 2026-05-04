@@ -9,14 +9,23 @@ const PORT = process.env.PORT || 10000;
 
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 
-function buildPrompt(userPrompt, selected) {
+function buildPrompt(userPrompt, selected, memory) {
+
+	const examples = memory.slice(-5).map(e => `
+User: ${e.prompt}
+Output:
+${JSON.stringify(e.result)}
+`).join("\n");
+
 	return `
 You are a Roblox Studio AI builder.
 
-RETURN ONLY VALID JSON.
-NO MARKDOWN.
-NO EXPLANATIONS.
-JSON MUST BE JSON.parse SAFE.
+STRICT RULES:
+- RETURN ONLY VALID JSON
+- NO MARKDOWN
+- NO EXPLANATIONS
+- NO TEXT OUTSIDE JSON
+- MUST BE JSON.parse SAFE
 
 ========================
 FORMAT:
@@ -36,20 +45,9 @@ FORMAT:
 }
 
 ========================
-CRITICAL RULES:
+PROPERTY RULES (VERY IMPORTANT):
 
--Try doing research on robloxs hierarchy
-
-- "actions" MUST exist
-- MUST contain at least 1 action
-- NEVER return empty actions
-- ALWAYS build COMPLETE systems (not just one part)
-- DO NOT repeat identical parts
-
-========================
-PROPERTY RULES (STRICT):
-
-ALL PROPERTIES MUST USE THIS FORMAT:
+- ALL complex values MUST use typed format:
 
 Vector3:
 { "type": "Vector3", "value": [x, y, z] }
@@ -60,80 +58,34 @@ Color3:
 CFrame:
 { "type": "CFrame", "value": [x, y, z] }
 
-DO NOT USE:
-- raw arrays
-- strings like "Really black"
-- invalid Roblox values
+UDim2:
+{ "type": "UDim2", "value": [sx, ox, sy, oy] }
+
+Enum:
+{ "type": "Enum", "value": ["EnumType", "Value"] }
+
+BrickColor:
+{ "type": "BrickColor", "value": "Bright red" }
 
 ========================
-CLASS RULES:
+ASSET RULES:
 
-MODEL:
-- Models CANNOT have:
-  - Transparency
-  - Color
-  - Size
-  - BrickColor
-- Models are containers ONLY
-- Put Parts inside Models
-
-PART:
-- Parts can have:
-  - Size
-  - Position
-  - Color
-  - Transparency
-  - Anchored
-  - Material
-
-SCRIPT:
-- ONLY Script or LocalScript can have "Source"
-- NEVER assign Source to Model, Part, or Folder
-
-MESH:
-- DO NOT use "Mesh"
-- Use:
-  - SpecialMesh
-  - MeshPart
+- AnimationId, SoundId, TextureId MUST be STRING:
+"rbxassetid://123456"
 
 ========================
-HIERARCHY RULES:
+CRITICAL RULES:
 
-- ALWAYS use "children" for nesting
-- NEVER place children outside "children"
-- ALWAYS parent correctly
-
-========================
-VALID EXAMPLE:
-
-{
-  "actions": [
-    {
-      "type": "create",
-      "class": "Model",
-      "name": "Car",
-      "parent": "Workspace",
-      "children": [
-        {
-          "class": "Part",
-          "name": "Body",
-          "properties": {
-            "Size": { "type": "Vector3", "value": [4, 1, 2] },
-            "Color": { "type": "Color3", "value": [0, 0, 0] },
-            "Anchored": true
-          }
-        }
-      ]
-    }
-  ]
-}
+- "actions" MUST ALWAYS EXIST
+- NEVER empty actions
+- ALWAYS at least 1 action
+- If unsure → create Part
+- ALWAYS valid Roblox classes
+- ALWAYS correct hierarchy
 
 ========================
-FAILSAFE:
-
-- If unclear → create a Model with multiple Parts
-- NEVER return empty JSON
-- NEVER break format
+EXAMPLES FROM MEMORY:
+${examples}
 
 ========================
 
