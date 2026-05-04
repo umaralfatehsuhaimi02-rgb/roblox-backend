@@ -13,12 +13,10 @@ function buildPrompt(userPrompt, selected) {
 	return `
 You are a Roblox Studio AI builder.
 
-STRICT:
-- RETURN ONLY VALID JSON
-- NO MARKDOWN
-- NO EXPLANATIONS
-- NO TEXT OUTSIDE JSON
-- MUST BE JSON.parse SAFE
+RETURN ONLY VALID JSON.
+NO MARKDOWN.
+NO EXPLANATIONS.
+JSON MUST BE JSON.parse SAFE.
 
 ========================
 FORMAT:
@@ -26,7 +24,7 @@ FORMAT:
 {
   "actions": [
     {
-      "type": "create | set | delete",
+      "type": "create | set | delete | rename",
       "class": "Instance class name",
       "name": "object name",
       "parent": "Workspace | StarterGui | StarterPack | ReplicatedStorage",
@@ -38,139 +36,104 @@ FORMAT:
 }
 
 ========================
-CORE RULES:
+CRITICAL RULES:
+
+-Try doing research on robloxs hierarchy
 
 - "actions" MUST exist
 - MUST contain at least 1 action
 - NEVER return empty actions
-- ALWAYS create something meaningful
-- ALWAYS follow proper hierarchy
+- ALWAYS build COMPLETE systems (not just one part)
+- DO NOT repeat identical parts
+
+========================
+PROPERTY RULES (STRICT):
+
+ALL PROPERTIES MUST USE THIS FORMAT:
+
+Vector3:
+{ "type": "Vector3", "value": [x, y, z] }
+
+Color3:
+{ "type": "Color3", "value": [r, g, b] }
+
+CFrame:
+{ "type": "CFrame", "value": [x, y, z] }
+
+DO NOT USE:
+- raw arrays
+- strings like "Really black"
+- invalid Roblox values
+
+========================
+CLASS RULES:
+
+MODEL:
+- Models CANNOT have:
+  - Transparency
+  - Color
+  - Size
+  - BrickColor
+- Models are containers ONLY
+- Put Parts inside Models
+
+PART:
+- Parts can have:
+  - Size
+  - Position
+  - Color
+  - Transparency
+  - Anchored
+  - Material
+
+SCRIPT:
+- ONLY Script or LocalScript can have "Source"
+- NEVER assign Source to Model, Part, or Folder
+
+MESH:
+- DO NOT use "Mesh"
+- Use:
+  - SpecialMesh
+  - MeshPart
+
+========================
+HIERARCHY RULES:
+
 - ALWAYS use "children" for nesting
+- NEVER place children outside "children"
+- ALWAYS parent correctly
 
 ========================
-ANTI-REPETITION (VERY IMPORTANT):
-
-- NEVER always create the same structure
-- NEVER default to a single Part
-- NEVER always use name "GeneratedPart"
-- EVERY response must be DIFFERENT
-- VARY names, structure, and properties
-- DO NOT reuse previous outputs
-
-If unsure:
-→ Create a SMALL COMPLETE SYSTEM instead of a single Part
-
-Examples:
-- building → multiple Parts inside Model
-- UI → ScreenGui with elements
-- tool → Tool with Handle
-- system → Script + Parts working together
-
-========================
-SCRIPT RULES:
-
-- Scripts MUST be:
-  - Script
-  - LocalScript
-
-- Code MUST be inside:
-  properties.Source
-
-- Scripts MUST DO something (not empty)
-- Prefer useful behavior (movement, UI interaction, events)
-
-Example:
+VALID EXAMPLE:
 
 {
-  "type": "create",
-  "class": "Script",
-  "name": "ExampleScript",
-  "parent": "Workspace",
-  "properties": {
-    "Source": "print(\\"Hello world\\")"
-  }
+  "actions": [
+    {
+      "type": "create",
+      "class": "Model",
+      "name": "Car",
+      "parent": "Workspace",
+      "children": [
+        {
+          "class": "Part",
+          "name": "Body",
+          "properties": {
+            "Size": { "type": "Vector3", "value": [4, 1, 2] },
+            "Color": { "type": "Color3", "value": [0, 0, 0] },
+            "Anchored": true
+          }
+        }
+      ]
+    }
+  ]
 }
 
 ========================
-UI RULES:
+FAILSAFE:
 
-- UI MUST be inside StarterGui
-- Structure:
-  ScreenGui → Frame → Elements
-- Include at least one visible element (TextLabel/TextButton)
-
-========================
-TOOL RULES:
-
-- Tools go in StarterPack
-- MUST include Handle (Part)
-
-========================
-PARTICLE RULES:
-
-- ParticleEmitter MUST be inside a Part
-
-========================
-ANIMATION RULES (R6 ONLY):
-
-If user asks for R15:
-RETURN:
-{ "error": "Only R6 animations are supported" }
-
-STRUCTURE MUST BE EXACT:
-
-KeyframeSequence
- └ Keyframe (Time REQUIRED)
-    └ Pose "HumanoidRootPart"
-       └ Pose "Torso" (MANDATORY)
-          ├ Pose "Left Arm"
-          ├ Pose "Right Arm"
-          ├ Pose "Left Leg"
-          └ Pose "Right Leg"
-
-CRITICAL:
-
-- Torso MUST ALWAYS exist
-- Limbs MUST be inside Torso
-- Minimum 2 Keyframes REQUIRED
-- Every Keyframe MUST include "Time"
-- NEVER skip Torso
-
-========================
-EASING RULES:
-
-- ONLY apply to Pose
-- NEVER apply to Keyframe
-
-EasingDirection:
-"In", "Out", "InOut", "OutIn"
-
-EasingStyle:
-"Linear", "Bounce", "Elastic", "Cubic"
-
-========================
-TRANSFORMS:
-
-- Position: [x, y, z]
-- Orientation: [x, y, z]
-
-========================
-GOOD OUTPUT BEHAVIOR:
-
-- If user asks for system → include Script + objects
-- If user asks for object → enhance it (not minimal)
-- If user is vague → create something interesting and usable
-- ALWAYS try to fulfill intent, not minimal fallback
-
-========================
-FAILSAFE (STRICT):
-
+- If unclear → create a Model with multiple Parts
 - NEVER return empty JSON
 - NEVER break format
-- NEVER output text outside JSON
-
-If still unclear:
-→ Create a SMALL but COMPLETE system (NOT a single Part)
 
 ========================
 
@@ -223,7 +186,10 @@ async function callOpenRouter(prompt, model) {
 				model: model || "meta-llama/llama-3-8b-instruct",
 				temperature: 0.2,
 				messages: [
-					{ role: "system", content: "Return ONLY valid JSON." },
+					{
+						role: "system",
+						content: "You MUST follow all rules and return ONLY valid JSON."
+					},
 					{ role: "user", content: prompt }
 				]
 			})
@@ -235,20 +201,10 @@ async function callOpenRouter(prompt, model) {
 			return null;
 		}
 
-		let text = data?.choices?.[0]?.message?.content;
-
-		if (text && !text.trim().startsWith("{")) {
-			const s = text.indexOf("{");
-			const e = text.lastIndexOf("}");
-			if (s !== -1 && e !== -1) {
-				text = text.substring(s, e + 1);
-			}
-		}
-
-		return text;
+		return data?.choices?.[0]?.message?.content;
 
 	} catch (err) {
-		console.log("OpenRouter crash:", err.message);
+		console.log("OpenRouter crash:", err);
 		return null;
 	}
 }
