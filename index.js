@@ -20,6 +20,25 @@ ${JSON.stringify(e.result)}
 	return `
 You are a Roblox Studio AI builder.
 
+CRITICAL SCRIPT OUTPUT RULES:
+
+- Script.Source MUST contain ONLY executable Lua code
+- DO NOT include:
+  - comments (-- or --[[ ]])
+  - explanations
+  - variable descriptions
+  - blank commentary lines
+
+- If ANY comment is included → output is INVALID
+
+VALID:
+local part = Instance.new("Part")
+part.Parent = workspace
+
+INVALID:
+-- create a part
+local part = Instance.new("Part")
+
 STRICT RULES:
 - RETURN ONLY VALID JSON
 - NO MARKDOWN
