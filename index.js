@@ -285,7 +285,7 @@ async function safeCall(fn) {
 	}
 }
 
-// ==================== PROVIDERS ====================
+// ================= PROVIDERS =================
 
 async function callGroq(prompt) {
 	if (!GROQ_KEY) return null;
@@ -301,41 +301,25 @@ async function callGroq(prompt) {
 				model: "llama3-8b-8192",
 				temperature: 0.2,
 				messages: [
-					{
-						role: "system",
-						content: "Return ONLY valid JSON. No extra text."
-					},
-					{
-						role: "user",
-						content: prompt
-					}
+					{ role: "system", content: "Return ONLY valid JSON." },
+					{ role: "user", content: prompt }
 				]
 			})
 		});
 
 		const data = await res.json();
-
-		if (!res.ok) {
-			console.log("Groq error:", data);
-			return null;
-		}
+		if (!res.ok) return null;
 
 		let text = data?.choices?.[0]?.message?.content;
 
-		console.log("Groq:", text);
-
 		if (text && !text.trim().startsWith("{")) {
-			const start = text.indexOf("{");
-			const end = text.lastIndexOf("}");
-			if (start !== -1 && end !== -1) {
-				text = text.substring(start, end + 1);
-			}
+			const s = text.indexOf("{");
+			const e = text.lastIndexOf("}");
+			if (s !== -1 && e !== -1) text = text.substring(s, e + 1);
 		}
 
 		return text;
-
-	} catch (err) {
-		console.log("Groq crash:", err.message);
+	} catch {
 		return null;
 	}
 }
@@ -351,7 +335,7 @@ async function callOpenRouter(prompt) {
 				"Content-Type": "application/json"
 			},
 			body: JSON.stringify({
-				model: "meta-llama/llama-3-8b-instruct",
+				model: "deepseek/deepseek-chat",
 				temperature: 0.2,
 				messages: [
 					{ role: "system", content: "Return ONLY valid JSON." },
@@ -361,28 +345,18 @@ async function callOpenRouter(prompt) {
 		});
 
 		const data = await res.json();
-
-		if (!res.ok) {
-			console.log("OpenRouter error:", data);
-			return null;
-		}
+		if (!res.ok) return null;
 
 		let text = data?.choices?.[0]?.message?.content;
 
-		console.log("OpenRouter:", text);
-
 		if (text && !text.trim().startsWith("{")) {
-			const start = text.indexOf("{");
-			const end = text.lastIndexOf("}");
-			if (start !== -1 && end !== -1) {
-				text = text.substring(start, end + 1);
-			}
+			const s = text.indexOf("{");
+			const e = text.lastIndexOf("}");
+			if (s !== -1 && e !== -1) text = text.substring(s, e + 1);
 		}
 
 		return text;
-
-	} catch (err) {
-		console.log("OpenRouter crash:", err.message);
+	} catch {
 		return null;
 	}
 }
@@ -406,25 +380,15 @@ async function callGemini(prompt) {
 		);
 
 		const data = await res.json();
-
-		if (!res.ok) {
-			console.log("Gemini error:", data);
-			return null;
-		}
+		if (!res.ok) return null;
 
 		return data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-	} catch (err) {
-		console.log("Gemini crash:", err.message);
+	} catch {
 		return null;
 	}
 }
 
-// ==================== ROUTES ====================
-
-app.get("/", (req, res) => {
-	res.send("OK");
-});
+// ================= ROUTE =================
 
 app.post("/generate", async (req, res) => {
 	try {
@@ -435,22 +399,22 @@ app.post("/generate", async (req, res) => {
 		lastCall = now;
 
 		const { prompt, selected } = req.body;
-
 		const fullPrompt = buildPrompt(prompt, selected);
 
 		const providers = [
-			() => callGroq(fullPrompt),
-			() => callOpenRouter(fullPrompt),
-			() => callGemini(fullPrompt)
+			{ name: "Groq", fn: () => callGroq(fullPrompt) },
+			{ name: "OpenRouter-DeepSeek", fn: () => callOpenRouter(fullPrompt) },
+			{ name: "Gemini", fn: () => callGemini(fullPrompt) }
 		];
 
 		let text = null;
+		let currentProvider = "none";
 
-		for (const provider of providers) {
-			text = await safeCall(provider);
-
-			if (text && text.length > 10) {
-				console.log("Provider success");
+		for (const p of providers) {
+			const result = await safeCall(p.fn);
+			if (result && result.length > 10) {
+				text = result;
+				currentProvider = p.name;
 				break;
 			}
 		}
@@ -462,11 +426,9 @@ app.post("/generate", async (req, res) => {
 		text = extractJSON(text);
 
 		let parsed;
-
 		try {
 			parsed = JSON.parse(text);
 		} catch {
-			console.log("JSON invalid");
 			return res.json({ error: "Invalid JSON", raw: text });
 		}
 
@@ -474,10 +436,12 @@ app.post("/generate", async (req, res) => {
 			return res.json({ error: "No actions returned", raw: parsed });
 		}
 
-		res.json(parsed);
+		res.json({
+			provider: currentProvider,
+			data: parsed
+		});
 
 	} catch (err) {
-		console.log("SERVER ERROR:", err.message);
 		res.status(500).json({ error: err.message });
 	}
 });
@@ -485,3 +449,4 @@ app.post("/generate", async (req, res) => {
 app.listen(PORT, () => {
 	console.log("Running on port " + PORT);
 });
+
