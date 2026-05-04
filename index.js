@@ -279,10 +279,17 @@ async function callOpenRouter(prompt) {
 					"X-Title": "Roblox AI Builder"
 				},
 				body: JSON.stringify({
-					model: "mistralai/mistral-7b-instruct",
+					model: "minimax/minimax-m2.5:free",
+					temperature: 0.2,
 					messages: [
-						{ role: "system", content: "Return ONLY valid JSON." },
-						{ role: "user", content: prompt }
+						{
+							role: "system",
+							content: "You MUST return ONLY valid JSON. No text."
+						},
+						{
+							role: "user",
+							content: prompt + "\n\nREMEMBER: OUTPUT ONLY JSON."
+						}
 					]
 				})
 			}
@@ -295,13 +302,22 @@ async function callOpenRouter(prompt) {
 			return null;
 		}
 
-		const text = data?.choices?.[0]?.message?.content;
+		let text = data?.choices?.[0]?.message?.content;
 
-		console.log("OpenRouter:", text);
+		console.log("Qwen raw:", text);
+		
+		if (text && !text.trim().startsWith("{")) {
+			const start = text.indexOf("{");
+			const end = text.lastIndexOf("}");
+			if (start !== -1 && end !== -1) {
+				text = text.substring(start, end + 1);
+			}
+		}
 
 		return text;
+
 	} catch (err) {
-		console.log("OpenRouter crash:", err.message);
+		console.log("Qwen crash:", err.message);
 		return null;
 	}
 }
