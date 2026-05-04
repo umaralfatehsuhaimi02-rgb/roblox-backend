@@ -46,6 +46,8 @@ STRICT RULES:
 - NO TEXT OUTSIDE JSON
 - MUST BE JSON.parse SAFE
 
+-If a user tells you to make a script involving a part, PUT THE SCRIPT INSIDE THE PART unless told otherwise
+
 ========================
 FORMAT:
 
