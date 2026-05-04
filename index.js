@@ -394,7 +394,7 @@ app.post("/generate", async (req, res) => {
 	try {
 		const { prompt, selected, model } = req.body;
 
-		const fullPrompt = prompt; -- replace later
+		const fullPrompt = prompt;
 
 		let text = await callOpenRouter(fullPrompt, model);
 
