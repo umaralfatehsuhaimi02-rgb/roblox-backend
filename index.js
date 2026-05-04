@@ -10,6 +10,9 @@ const PORT = process.env.PORT || 10000;
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 
+let memory = [];
+let lastCall = 0;
+
 function buildPrompt(userPrompt, selected) {
 	return `
 You are a Roblox Studio AI builder.
@@ -43,19 +46,21 @@ CRITICAL GLOBAL RULES:
 
 - "actions" MUST ALWAYS EXIST
 - NEVER return empty actions
-- If unsure → create a simple Part in Workspace
+- ALWAYS return at least 1 action
+- If unsure → create a simple Part
 - ALWAYS use valid Roblox class names
-- ALWAYS use correct hierarchy
+- ALWAYS use proper hierarchy
 - ALWAYS use "children" for nesting
-- NEVER place children outside of "children" array
+- NEVER place children outside "children"
 
 ========================
 SCRIPT RULES:
 
-- Scripts MUST use:
+- Scripts MUST be:
   - Script
   - LocalScript
-- Code goes inside:
+
+- Code MUST be inside:
   properties.Source
 
 Example:
@@ -74,14 +79,14 @@ Example:
 UI RULES:
 
 - UI must be inside StarterGui
-- Use:
+- Use structure:
   ScreenGui → Frame → TextLabel / TextButton
 
 ========================
 TOOL RULES:
 
 - Tools go in StarterPack
-- Tool must contain:
+- Tool MUST contain:
   - Handle (Part)
 
 ========================
@@ -112,7 +117,9 @@ CRITICAL:
 - Torso MUST ALWAYS exist
 - Limbs MUST be inside Torso
 - Minimum 2 Keyframes REQUIRED
-- Every Keyframe MUST have "Time"
+- Every Keyframe MUST include "Time"
+- HumanoidRootPart MUST contain Torso
+- NEVER skip Torso
 
 ========================
 EASING RULES:
@@ -140,7 +147,7 @@ VALID ANIMATION EXAMPLE:
     {
       "type": "create",
       "class": "KeyframeSequence",
-      "name": "ExampleAnim",
+      "name": "ExampleAnimation",
       "parent": "Workspace",
       "children": [
         {
@@ -195,10 +202,58 @@ VALID ANIMATION EXAMPLE:
 }
 
 ========================
+EXAMPLE (SCRIPT):
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "Script",
+      "name": "PrintScript",
+      "parent": "Workspace",
+      "properties": {
+        "Source": "print(\\"Hello from AI\\")"
+      }
+    }
+  ]
+}
+
+========================
+EXAMPLE (UI):
+
+{
+  "actions": [
+    {
+      "type": "create",
+      "class": "ScreenGui",
+      "name": "MyUI",
+      "parent": "StarterGui",
+      "children": [
+        {
+          "class": "Frame",
+          "name": "MainFrame",
+          "children": [
+            {
+              "class": "TextLabel",
+              "name": "Label",
+              "properties": {
+                "Text": "Hello UI"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+========================
 FAILSAFE:
 
-- If request is unclear → create a Part named "GeneratedPart"
-- NEVER return empty or invalid JSON
+- If request is unclear → create:
+  Part named "GeneratedPart" in Workspace
+- NEVER return empty JSON
+- NEVER break format
 
 ========================
 
@@ -208,9 +263,6 @@ User request:
 ${userPrompt}
 `;
 }
-
-let memory = [];
-let lastCall = 0;
 
 function extractJSON(text) {
 	if (!text) return null;
@@ -223,18 +275,18 @@ function extractJSON(text) {
 	return text;
 }
 
-function fetchWithTimeout(url, options, timeout = 500000) {
-	return Promise.race([
-		fetch(url, options),
-		new Promise((_, reject) =>
-			setTimeout(() => reject(new Error("Timeout")), timeout)
-		)
-	]);
+async function safeCall(fn, prompt) {
+	try {
+		return await fn(prompt);
+	} catch (err) {
+		console.log("Call failed:", err.message);
+		return null;
+	}
 }
 
 async function callGemini(prompt) {
 	try {
-		const res = await fetchWithTimeout(
+		const res = await fetch(
 			"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
 			{
 				method: "POST",
@@ -255,11 +307,8 @@ async function callGemini(prompt) {
 			return null;
 		}
 
-		const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+		return data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-		console.log("Gemini:", text);
-
-		return text;
 	} catch (err) {
 		console.log("Gemini crash:", err.message);
 		return null;
@@ -268,32 +317,23 @@ async function callGemini(prompt) {
 
 async function callOpenRouter(prompt) {
 	try {
-		const res = await fetchWithTimeout(
-			"https://openrouter.ai/api/v1/chat/completions",
-			{
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${OPENROUTER_KEY}`,
-					"Content-Type": "application/json",
-					"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
-					"X-Title": "Roblox AI Builder"
-				},
-				body: JSON.stringify({
-					model: "openai/gpt-oss-120b:free",
-					temperature: 0.2,
-					messages: [
-						{
-							role: "system",
-							content: "You MUST return ONLY valid JSON. No text."
-						},
-						{
-							role: "user",
-							content: prompt + "\n\nREMEMBER: OUTPUT ONLY JSON."
-						}
-					]
-				})
-			}
-		);
+		const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${OPENROUTER_KEY}`,
+				"Content-Type": "application/json",
+				"HTTP-Referer": "https://roblox-backend-plugin.onrender.com",
+				"X-Title": "Roblox AI Builder"
+			},
+			body: JSON.stringify({
+				model: "qwen/qwen3-coder:free",
+				temperature: 0.2,
+				messages: [
+					{ role: "system", content: "Return ONLY valid JSON." },
+					{ role: "user", content: prompt }
+				]
+			})
+		});
 
 		const data = await res.json();
 
@@ -304,8 +344,6 @@ async function callOpenRouter(prompt) {
 
 		let text = data?.choices?.[0]?.message?.content;
 
-		console.log("Qwen raw:", text);
-		
 		if (text && !text.trim().startsWith("{")) {
 			const start = text.indexOf("{");
 			const end = text.lastIndexOf("}");
@@ -329,8 +367,8 @@ app.get("/", (req, res) => {
 app.post("/generate", async (req, res) => {
 	try {
 		const now = Date.now();
-		if (now - lastCall < 500) {
-			return res.json({ error: "Rate limited" });
+		if (now - lastCall < 1500) {
+			return res.json({ error: "Slow down" });
 		}
 		lastCall = now;
 
@@ -338,11 +376,11 @@ app.post("/generate", async (req, res) => {
 
 		const fullPrompt = buildPrompt(prompt, selected);
 
-		let text = await callGemini(fullPrompt);
+		let text = await safeCall(callGemini, fullPrompt);
 
 		if (!text || text.length < 10) {
-			console.log("Fallback to OpenRouter");
-			text = await callOpenRouter(fullPrompt);
+			console.log("Fallback to Qwen");
+			text = await safeCall(callOpenRouter, fullPrompt);
 		}
 
 		if (!text) {
@@ -356,14 +394,7 @@ app.post("/generate", async (req, res) => {
 		try {
 			parsed = JSON.parse(text);
 		} catch {
-			console.log("INVALID JSON:", text);
-			return res.json({ error: "Invalid JSON", raw: text });
-		}
-
-		if (!parsed.actions) {
-			console.log("Retrying with OpenRouter (no actions)");
-
-			let retry = await callOpenRouter(fullPrompt);
+			let retry = await safeCall(callOpenRouter, fullPrompt);
 
 			if (retry) {
 				retry = extractJSON(retry);
@@ -373,8 +404,11 @@ app.post("/generate", async (req, res) => {
 			}
 		}
 
-		if (!parsed.actions) {
-			return res.json({ error: "No actions returned", raw: parsed });
+		if (!parsed || !parsed.actions) {
+			return res.json({
+				error: "No actions returned",
+				raw: text
+			});
 		}
 
 		res.json(parsed);
